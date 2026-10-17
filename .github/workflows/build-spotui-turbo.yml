@@ -18,20 +18,12 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 3. Inyectar Optimizaciones Turbo en Spotui automaticamente
+      - name: 3. Inyectar Optimizaciones Turbo en Spotui
         run: |
           python3 - << 'EOF'
           import os, glob, re
 
-          # A. Optimizar gradle.properties para compilacion rapida y R8
-          gp_path = "gradle.properties"
-          gp_content = open(gp_path, "r", encoding="utf-8").read() if os.path.exists(gp_path) else ""
-          extra_props = "\norg.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8\norg.gradle.parallel=true\norg.gradle.caching=true\n"
-          if "org.gradle.parallel" not in gp_content:
-              with open(gp_path, "a", encoding="utf-8") as f:
-                  f.write(extra_props)
-
-          # B. Registrar TurboInitProvider y Hardware Acceleration en AndroidManifest.xml
+          # Registrar TurboInitProvider y Hardware Acceleration en el Manifiesto
           for manifest in glob.glob("**/src/main/AndroidManifest.xml", recursive=True):
               txt = open(manifest, "r", encoding="utf-8").read()
               if "com.spotui.turbo.TurboInitProvider" not in txt and "</application>" in txt:
@@ -48,7 +40,7 @@ jobs:
                       f.write(txt)
                   print(f"Manifest optimizado: {manifest}")
 
-          # C. Conectar ExoPlayer.Builder con el buffer rapido de 350ms (TurboOptimizer)
+          # Conectar ExoPlayer con el buffer rápido de 350ms en los archivos Kotlin
           for kt_file in glob.glob("app/src/**/*.kt", recursive=True):
               if "TurboOptimizer.kt" in kt_file:
                   continue
@@ -61,33 +53,6 @@ jobs:
                       with open(kt_file, "w", encoding="utf-8") as f:
                           f.write(new_txt)
                       print(f"ExoPlayer Turbo inyectado en: {kt_file}")
-
-          # D. Activar compose_stability.conf y firma automatica en app/build.gradle.kts
-          for gradle_file in glob.glob("**/build.gradle.kts", recursive=True):
-              txt = open(gradle_file, "r", encoding="utf-8").read()
-              if "com.android.application" in txt:
-                  stability_path = os.path.abspath("compose_stability.conf")
-                  inject_block = f"""
-          android {{
-              buildTypes {{
-                  getByName("release") {{
-                      isMinifyEnabled = false
-                      signingConfig = signingConfigs.getByName("debug")
-                  }}
-              }}
-          }}
-          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {{
-              kotlinOptions {{
-                  freeCompilerArgs = freeCompilerArgs + listOf(
-                      "-P",
-                      "plugin:androidx.compose.compiler.plugins.kotlin:stabilityConfigurationPath={stability_path}"
-                  )
-              }}
-          }}
-          """
-                  with open(gradle_file, "a", encoding="utf-8") as f:
-                      f.write(inject_block)
-                  print(f"Gradle Release + Compose Stability configurado en: {gradle_file}")
           EOF
 
       - name: 4. Configurar Gradle
@@ -98,7 +63,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon -x lint
 
-      - name: 6. Subir APK listo para descargar en tu celular
+      - name: 6. Subir APK listo para descargar
         uses: actions/upload-artifact@v4
         with:
           name: Spotui-Turbo-APK
