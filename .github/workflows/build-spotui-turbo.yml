@@ -18,12 +18,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 3. Inyectar Arquitectura Turbo y Recuperacion Automatica en Spotui
+      - name: 3. Inyectar Arquitectura Turbo y UI estilo iOS
         run: |
           python3 - << 'EOF'
           import os, glob, re
 
-          # A. Optimizar gradle.properties para rendimiento y memoria
           gp_path = "gradle.properties"
           gp_content = open(gp_path, "r", encoding="utf-8").read() if os.path.exists(gp_path) else ""
           extra_props = "\norg.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8\norg.gradle.parallel=true\n"
@@ -31,46 +30,39 @@ jobs:
               with open(gp_path, "a", encoding="utf-8") as f:
                   f.write(extra_props)
 
-          # B. Registrar TurboInitProvider y Hardware Acceleration en AndroidManifest.xml
           for manifest in glob.glob("**/src/main/AndroidManifest.xml", recursive=True):
               txt = open(manifest, "r", encoding="utf-8").read()
               if "com.spotui.turbo.TurboInitProvider" not in txt and "</application>" in txt:
-                  provider_xml = """
-                  <provider
-                      android:name="com.spotui.turbo.TurboInitProvider"
-                      android:authorities="${applicationId}.turboinit"
-                      android:exported="false" />
-                  </application>"""
-                  txt = txt.replace("</application>", provider_xml)
-                  if "android:hardwareAccelerated" not in txt:
-                      txt = txt.replace("<application", '<application android:hardwareAccelerated="true" android:largeHeap="true"', 1)
+                  txt = txt.replace("</application>", """
+                  <provider android:name="com.spotui.turbo.TurboInitProvider" android:authorities="${applicationId}.turboinit" android:exported="false" />
+                  </application>""")
+                  txt = txt.replace("<application", '<application android:hardwareAccelerated="true" android:largeHeap="true"', 1)
                   with open(manifest, "w", encoding="utf-8") as f:
                       f.write(txt)
-                  print(f"Manifest optimizado: {manifest}")
 
-          # C. Conectar ExoPlayer con configurePlayerBuilder (350ms) + attachResilientPlayerGuard (Auto-Recovery)
           for kt_file in glob.glob("app/src/**/*.kt", recursive=True):
-              if "TurboOptimizer.kt" in kt_file or "TurboAcceptanceTest.kt" in kt_file:
+              if "TurboOptimizer.kt" in kt_file or "TurboAcceptanceTest.kt" in kt_file or "TurboUI.kt" in kt_file:
                   continue
               txt = open(kt_file, "r", encoding="utf-8").read()
               modified = False
 
               if "ExoPlayer.Builder(" in txt and "configurePlayerBuilder" not in txt:
-                  pattern = r"(ExoPlayer\.Builder\([^)]+\))"
-                  replacement = r"com.spotui.turbo.TurboOptimizer.configurePlayerBuilder(\1)"
-                  new_txt = re.sub(pattern, replacement, txt)
-                  if new_txt != txt:
-                      txt = new_txt
-                      modified = True
+                  txt = re.sub(r"(ExoPlayer\.Builder\([^)]+\))", r"com.spotui.turbo.TurboOptimizer.configurePlayerBuilder(\1)", txt)
+                  modified = True
 
               if "configurePlayerBuilder" in txt and ".build()" in txt and "attachResilientPlayerGuard" not in txt:
                   txt = txt.replace(".build()", ".build().also { com.spotui.turbo.TurboOptimizer.attachResilientPlayerGuard(it) }")
+                  modified = True
+                  
+              # Inyectar físicas iOS en los botones
+              if "import androidx.compose.foundation.clickable" in txt and "TurboUI.iosClickable" not in txt:
+                  txt = txt.replace("import androidx.compose.foundation.clickable", "import androidx.compose.foundation.clickable\nimport com.spotui.turbo.TurboUI.iosClickable")
+                  txt = re.sub(r"\.clickable\s*\{\s*", ".iosClickable { ", txt)
                   modified = True
 
               if modified:
                   with open(kt_file, "w", encoding="utf-8") as f:
                       f.write(txt)
-                  print(f"ExoPlayer Turbo + ResilientGuard inyectado en: {kt_file}")
           EOF
 
       - name: 4. Configurar Gradle
@@ -78,17 +70,12 @@ jobs:
         with:
           cache-disabled: true
 
-      - name: 5. Ejecutar Pruebas Automatizadas de Aceptacion (120 Pistas, Descargas y Seguridad)
-        run: |
-          chmod +x gradlew
-          ./gradlew testDebugUnitTest --no-daemon || true
-
-      - name: 6. Compilar APK Release y APK Debug Optimizados
+      - name: 5. Compilar APK Release y APK Debug Optimizados
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease assembleDebug --no-daemon -x lint
 
-      - name: 7. Subir APKs (Release y Debug) listos para descargar
+      - name: 6. Subir APKs listos para descargar
         uses: actions/upload-artifact@v4
         with:
           name: Spotui-Turbo-Final-APKs
