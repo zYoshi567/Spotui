@@ -23,6 +23,7 @@ jobs:
           python3 - << 'EOF'
           import os, glob, re
 
+          # Optimizar memoria de Gradle
           gp_path = "gradle.properties"
           gp_content = open(gp_path, "r", encoding="utf-8").read() if os.path.exists(gp_path) else ""
           extra_props = "\norg.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8\norg.gradle.parallel=true\n"
@@ -30,6 +31,15 @@ jobs:
               with open(gp_path, "a", encoding="utf-8") as f:
                   f.write(extra_props)
 
+          # Desactivar R8/Minify para evitar el crash del compilador
+          for gradle_file in glob.glob("**/build.gradle.kts", recursive=True):
+              txt = open(gradle_file, "r", encoding="utf-8").read()
+              if "isMinifyEnabled = true" in txt:
+                  txt = txt.replace("isMinifyEnabled = true", "isMinifyEnabled = false")
+                  with open(gradle_file, "w", encoding="utf-8") as f:
+                      f.write(txt)
+
+          # Actualizar AndroidManifest
           for manifest in glob.glob("**/src/main/AndroidManifest.xml", recursive=True):
               txt = open(manifest, "r", encoding="utf-8").read()
               if "com.spotui.turbo.TurboInitProvider" not in txt and "</application>" in txt:
@@ -40,6 +50,7 @@ jobs:
                   with open(manifest, "w", encoding="utf-8") as f:
                       f.write(txt)
 
+          # Inyectar físicas iOS en los botones
           for kt_file in glob.glob("app/src/**/*.kt", recursive=True):
               if "TurboOptimizer.kt" in kt_file or "TurboAcceptanceTest.kt" in kt_file or "TurboUI.kt" in kt_file:
                   continue
@@ -54,7 +65,6 @@ jobs:
                   txt = txt.replace(".build()", ".build().also { com.spotui.turbo.TurboOptimizer.attachResilientPlayerGuard(it) }")
                   modified = True
                   
-              # Inyectar físicas iOS en los botones
               if "import androidx.compose.foundation.clickable" in txt and "TurboUI.iosClickable" not in txt:
                   txt = txt.replace("import androidx.compose.foundation.clickable", "import androidx.compose.foundation.clickable\nimport com.spotui.turbo.TurboUI.iosClickable")
                   txt = re.sub(r"\.clickable\s*\{\s*", ".iosClickable { ", txt)
