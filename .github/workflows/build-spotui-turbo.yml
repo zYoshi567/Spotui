@@ -23,7 +23,7 @@ jobs:
           python3 - << 'EOF'
           import os, glob, re
 
-          # Optimizar memoria de Gradle
+          # 1. Asegurar memoria suficiente en Gradle
           gp_path = "gradle.properties"
           gp_content = open(gp_path, "r", encoding="utf-8").read() if os.path.exists(gp_path) else ""
           extra_props = "\norg.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8\norg.gradle.parallel=true\n"
@@ -31,48 +31,94 @@ jobs:
               with open(gp_path, "a", encoding="utf-8") as f:
                   f.write(extra_props)
 
-          # Desactivar R8/Minify para evitar el crash del compilador
-          for gradle_file in glob.glob("**/build.gradle.kts", recursive=True):
-              txt = open(gradle_file, "r", encoding="utf-8").read()
-              if "isMinifyEnabled = true" in txt:
-                  txt = txt.replace("isMinifyEnabled = true", "isMinifyEnabled = false")
-                  with open(gradle_file, "w", encoding="utf-8") as f:
-                      f.write(txt)
+          # 2. Escribir TurboUI.kt con la funcion top-level correcta para Kotlin
+          os.makedirs("app/src/main/java/com/spotui/turbo", exist_ok=True)
+          turbo_ui_code = """package com.spotui.turbo
 
-          # Actualizar AndroidManifest
+          import androidx.compose.animation.core.Spring
+          import androidx.compose.animation.core.animateFloatAsState
+          import androidx.compose.animation.core.spring
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.interaction.MutableInteractionSource
+          import androidx.compose.foundation.interaction.collectIsPressedAsState
+          import androidx.compose.runtime.getValue
+          import androidx.compose.runtime.remember
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.composed
+          import androidx.compose.ui.graphics.graphicsLayer
+
+          fun Modifier.iosClickable(onClick: () -> Unit): Modifier = composed {
+              val interactionSource = remember { MutableInteractionSource() }
+              val isPressed by interactionSource.collectIsPressedAsState()
+
+              val scale by animateFloatAsState(
+                  targetValue = if (isPressed) 0.94f else 1f,
+                  animationSpec = spring(
+                      dampingRatio = Spring.DampingRatioMediumBouncy,
+                      stiffness = Spring.StiffnessLow
+                  ),
+                  label = "ios_bounce"
+              )
+
+              this
+                  .graphicsLayer {
+                      scaleX = scale
+                      scaleY = scale
+                  }
+                  .clickable(
+                      interactionSource = interactionSource,
+                      indication = null,
+                      onClick = onClick
+                  )
+          }
+          """
+          with open("app/src/main/java/com/spotui/turbo/TurboUI.kt", "w", encoding="utf-8") as f:
+              f.write(turbo_ui_code)
+
+          # 3. Registrar TurboInitProvider y Hardware Acceleration en AndroidManifest.xml
           for manifest in glob.glob("**/src/main/AndroidManifest.xml", recursive=True):
               txt = open(manifest, "r", encoding="utf-8").read()
               if "com.spotui.turbo.TurboInitProvider" not in txt and "</application>" in txt:
                   txt = txt.replace("</application>", """
                   <provider android:name="com.spotui.turbo.TurboInitProvider" android:authorities="${applicationId}.turboinit" android:exported="false" />
                   </application>""")
-                  txt = txt.replace("<application", '<application android:hardwareAccelerated="true" android:largeHeap="true"', 1)
+                  if "android:hardwareAccelerated" not in txt:
+                      txt = txt.replace("<application", '<application android:hardwareAccelerated="true" android:largeHeap="true"', 1)
                   with open(manifest, "w", encoding="utf-8") as f:
                       f.write(txt)
 
-          # Inyectar físicas iOS en los botones
-          for kt_file in glob.glob("app/src/**/*.kt", recursive=True):
-              if "TurboOptimizer.kt" in kt_file or "TurboAcceptanceTest.kt" in kt_file or "TurboUI.kt" in kt_file:
+          # 4. Inyectar ExoPlayer Turbo (solo en ExoPlayer.Builder) y fisicas iOS
+          for kt_file in glob.glob("app/src/main/**/*.kt", recursive=True):
+              if "TurboOptimizer.kt" in kt_file or "TurboUI.kt" in kt_file:
                   continue
               txt = open(kt_file, "r", encoding="utf-8").read()
               modified = False
 
               if "ExoPlayer.Builder(" in txt and "configurePlayerBuilder" not in txt:
-                  txt = re.sub(r"(ExoPlayer\.Builder\([^)]+\))", r"com.spotui.turbo.TurboOptimizer.configurePlayerBuilder(\1)", txt)
+                  txt = re.sub(
+                      r"(ExoPlayer\.Builder\([^)]+\))",
+                      r"com.spotui.turbo.TurboOptimizer.configurePlayerBuilder(\1)",
+                      txt
+                  )
+                  txt = re.sub(
+                      r"(com\.spotui\.turbo\.TurboOptimizer\.configurePlayerBuilder\(ExoPlayer\.Builder\([^)]+\)\)(?:\s*\.[a-zA-Z0-9_]+\([^)]*\))*)\s*\.build\(\)",
+                      r"\1.build().also { com.spotui.turbo.TurboOptimizer.attachResilientPlayerGuard(it) }",
+                      txt
+                  )
                   modified = True
 
-              if "configurePlayerBuilder" in txt and ".build()" in txt and "attachResilientPlayerGuard" not in txt:
-                  txt = txt.replace(".build()", ".build().also { com.spotui.turbo.TurboOptimizer.attachResilientPlayerGuard(it) }")
-                  modified = True
-                  
-              if "import androidx.compose.foundation.clickable" in txt and "TurboUI.iosClickable" not in txt:
-                  txt = txt.replace("import androidx.compose.foundation.clickable", "import androidx.compose.foundation.clickable\nimport com.spotui.turbo.TurboUI.iosClickable")
+              if "import androidx.compose.foundation.clickable" in txt and "com.spotui.turbo.iosClickable" not in txt:
+                  txt = txt.replace(
+                      "import androidx.compose.foundation.clickable",
+                      "import androidx.compose.foundation.clickable\nimport com.spotui.turbo.iosClickable"
+                  )
                   txt = re.sub(r"\.clickable\s*\{\s*", ".iosClickable { ", txt)
                   modified = True
 
               if modified:
                   with open(kt_file, "w", encoding="utf-8") as f:
                       f.write(txt)
+                  print(f"Optimizado: {kt_file}")
           EOF
 
       - name: 4. Configurar Gradle
@@ -80,16 +126,15 @@ jobs:
         with:
           cache-disabled: true
 
-      - name: 5. Compilar APK Release y APK Debug Optimizados
+      - name: 5. Compilar APK Release Optimizado
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease assembleDebug --no-daemon -x lint
+          ./gradlew assembleRelease --no-daemon -x lint
 
-      - name: 6. Subir APKs listos para descargar
+      - name: 6. Subir APK listo para descargar
         uses: actions/upload-artifact@v4
         with:
-          name: Spotui-Turbo-Final-APKs
+          name: Spotui-Turbo-iOS-APK
           path: |
             app/build/outputs/apk/release/*.apk
-            app/build/outputs/apk/debug/*.apk
             **/build/outputs/apk/release/*.apk
